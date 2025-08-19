@@ -400,11 +400,23 @@ async def setup_bot() -> None:
     # Build OpenAI client
     openai_client = OpenAIClient(api_key=config.openai_api_key)
 
-    # Register handlers
-    router.message.register(handle_start, Command(commands=["start"]))
-    router.callback_query.register(callback_handler)
-    router.pre_checkout_query.register(handle_pre_checkout)
-    router.message.register(handle_successful_payment, F.successful_payment)
+    # Register handlers. Use wrappers to pass config and other dependencies.
+    # The aiogram dispatcher only injects certain built-in parameters (like message, callback, state).
+    # Our handlers also expect custom dependencies (bot, config), so we wrap them to provide those.
+    router.message.register(
+        lambda message, state: handle_start(message, state, bot, config),
+        Command(commands=["start"]),
+    )
+    router.callback_query.register(
+        lambda callback, state: callback_handler(callback, state, bot, config)
+    )
+    router.pre_checkout_query.register(
+        lambda query: handle_pre_checkout(query, bot, config)
+    )
+    router.message.register(
+        lambda message: handle_successful_payment(message, bot, config),
+        F.successful_payment,
+    )
     # Chat state
     router.message.register(
         lambda m, s: handle_chat_input(m, s, bot, config, openai_client),
