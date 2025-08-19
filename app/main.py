@@ -400,33 +400,42 @@ async def setup_bot() -> None:
     # Build OpenAI client
     openai_client = OpenAIClient(api_key=config.openai_api_key)
 
-    # Register handlers. Use wrappers to pass config and other dependencies.
-    # The aiogram dispatcher only injects certain built-in parameters (like message, callback, state).
-    # Our handlers also expect custom dependencies (bot, config), so we wrap them to provide those.
-    router.message.register(
-        lambda message, state: handle_start(message, state, bot, config),
-        Command(commands=["start"]),
-    )
-    router.callback_query.register(
-        lambda callback, state: callback_handler(callback, state, bot, config)
-    )
-    router.pre_checkout_query.register(
-        lambda query: handle_pre_checkout(query, bot, config)
-    )
-    router.message.register(
-        lambda message: handle_successful_payment(message, bot, config),
-        F.successful_payment,
-    )
+    # Register handlers. Define async wrapper functions to pass config, bot and other dependencies.
+    # The aiogram dispatcher automatically awaits async handlers, so wrapper functions must also be async.
+
+    async def start_handler(message: Message, state: FSMContext) -> None:
+        """Wrapper for the /start command that injects bot and config."""
+        await handle_start(message, state, bot, config)
+
+    async def callback_query_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        """Wrapper for callback queries that injects bot and config."""
+        await callback_handler(callback, state, bot, config)
+
+    async def pre_checkout_handler(query: PreCheckoutQuery) -> None:
+        """Wrapper for pre-checkout queries that injects bot and config."""
+        await handle_pre_checkout(query, bot, config)
+
+    async def successful_payment_handler(message: Message) -> None:
+        """Wrapper for successful payment messages that injects bot and config."""
+        await handle_successful_payment(message, bot, config)
+
+    async def chat_input_handler(message: Message, state: FSMContext) -> None:
+        """Wrapper for chat input state that injects bot, config and openai_client."""
+        await handle_chat_input(message, state, bot, config, openai_client)
+
+    async def profile_input_handler(message: Message, state: FSMContext) -> None:
+        """Wrapper for profile input state that injects bot, config and openai_client."""
+        await handle_profile_input(message, state, bot, config, openai_client)
+
+    # Register the wrapper handlers with appropriate filters.
+    router.message.register(start_handler, Command(commands=["start"]))
+    router.callback_query.register(callback_query_handler)
+    router.pre_checkout_query.register(pre_checkout_handler)
+    router.message.register(successful_payment_handler, F.successful_payment)
     # Chat state
-    router.message.register(
-        lambda m, s: handle_chat_input(m, s, bot, config, openai_client),
-        StateFilter(Form.chat_waiting_input),
-    )
+    router.message.register(chat_input_handler, StateFilter(Form.chat_waiting_input))
     # Profile state
-    router.message.register(
-        lambda m, s: handle_profile_input(m, s, bot, config, openai_client),
-        StateFilter(Form.profile_waiting_input),
-    )
+    router.message.register(profile_input_handler, StateFilter(Form.profile_waiting_input))
 
     dp.include_router(router)
     # Start polling
