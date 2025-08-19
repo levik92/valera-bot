@@ -11,10 +11,10 @@ SYSTEM_PROMPT = (
     "Отвечай кратко, уверенно и без воды, со здоровой иронией, но без токсичности. "
     "Всегда возвращай строго валидный JSON по заданной схеме без каких-либо других "
     "комментариев. Если ввод содержит изображения, сначала вытащи из них текст и контекст, "
-    "затем анализируй.""
+    "затем ааизируй.""
 )
 
-# Chat analysis schema description for the user prompt
+# Chat analysis schema decription for the user prompt
 CHAT_SCHEMA_DESCRIPTION = (
     "Верни JSON с ключами: \n"
     "interest_score — число 0–100; \n"
