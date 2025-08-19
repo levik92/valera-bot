@@ -20,11 +20,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import declarative_base, relationship
 
 
+# Derive the database URL from the environment.  If DATABASE_URL is not set,
+# fall back to a SQLite database under the /tmp directory.  Heroku's file
+# system is read‑only except for /tmp, so using /tmp allows the bot to
+# persist data for the lifetime of a dyno.  Note that SQLite data stored in
+# /tmp will be lost when the dyno restarts; for production use a Postgres
+# DATABASE_URL instead.
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    # default to a local SQLite database.  Note: SQLite on Heroku is not
-    # persisted across dyno restarts.  Use Postgres in production.
-    "sqlite+aiosqlite:///./valera.db",
+    "sqlite+aiosqlite:///tmp/valera.db",
 )
 
 engine = create_async_engine(DATABASE_URL, echo=False, future=True)
