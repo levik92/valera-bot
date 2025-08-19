@@ -28,7 +28,8 @@ from sqlalchemy.orm import declarative_base, relationship
 # DATABASE_URL instead.
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "sqlite+aiosqlite:///tmp/valera.db",
+    # Use an absolute path with four slashes for sqlite; see SQLAlchemy docs.
+    "sqlite+aiosqlite:////tmp/valera.db",
 )
 
 engine = create_async_engine(DATABASE_URL, echo=False, future=True)
