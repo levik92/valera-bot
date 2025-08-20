@@ -197,27 +197,30 @@ async def callback_handler(
             else:
                 await callback.answer("Похоже, ты ещё не подписан", show_alert=True)
     elif data == "start_chat":
-        await callback.message.answer("Отправь текст переписки или фотографии, которые нужно проанализировать. После получения я пришлю результат.")
+        # Prompt the user to send the conversation.  Keep the tone friendly and clear.
+        await callback.message.answer(
+            "Ок! Пришли переписку — текстом или скринами. Я помогу понять, как она к тебе относится, и предложу лучшие ответы."
+        )
         await state.set_state(Form.chat_waiting_input)
         await callback.answer()
     elif data == "girl_profile":
         # Пользователь хочет проанализировать анкету девушки
         await callback.message.answer(
-            "Пришли анкету девушки: текст профиля, фотографии или скрины. Я расскажу, какая она и как подойти."
+            "Пришли анкету девушки: текст, фото или скрин. Я расскажу, какая она, чем увлекается и как лучше завести разговор."
         )
         await state.set_state(Form.girl_profile_waiting_input)
         await callback.answer()
     elif data == "my_profile":
         # Пользователь хочет проанализировать свою анкету
         await callback.message.answer(
-            "Пришли свою анкету: текст, фото или скрины. Я оценю и подскажу, что улучшить."
+            "Давай посмотрим на твой профиль. Пришли текст, фото или скрины, и я скажу, что супер, а что можно подтянуть."
         )
         await state.set_state(Form.my_profile_waiting_input)
         await callback.answer()
     elif data == "awkward_pauses":
         # Пользователь хочет закрыть неловкую паузу
         await callback.message.answer(
-            "Расскажи немного о ситуации (чат или свидание) и о чём говорили. Я подкину темы для продолжения."
+            "Опиши, где вы сейчас (чат или свидание) и что обсуждали. Я подкину темы, чтобы заполнить паузу и поддержать вайб."
         )
         await state.set_state(Form.pause_waiting_input)
         await callback.answer()
@@ -279,7 +282,7 @@ async def callback_handler(
         )
         await callback.answer()
     elif data == "back_main":
-        # Показать главное меню с расширенными функциями
+        # Показать главное меню. Предложите выбрать пункт или задать вопрос прямо текстом.
         menu_kb = [
             [InlineKeyboardButton(text="Разобрать переписку", callback_data="start_chat")],
             [InlineKeyboardButton(text="Анализ профиля девушки", callback_data="girl_profile")],
@@ -290,7 +293,7 @@ async def callback_handler(
             [InlineKeyboardButton(text="Реферальная ссылка", callback_data="show_referral")],
         ]
         await callback.message.answer(
-            "Главное меню:",
+            "Главное меню. Выбери кнопку или просто напиши мне, в чём нужна помощь:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=menu_kb),
         )
         await callback.answer()
@@ -465,9 +468,11 @@ async def handle_profile_input(
             )
             await state.clear()
             return
+        # Deduct one token and log Valera's reply
         await deduct_credits(session, user, 1)
-        formatted = json.dumps(result, ensure_ascii=False, indent=2)
-        await message.answer(f"Результат анализа:\n<pre>{formatted}</pre>", parse_mode="HTML")
+        await log_message(session, user_id, "valera", result)
+        # Send plain text result without JSON formatting
+        await message.answer(result)
         await state.clear()
 
 
