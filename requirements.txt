@@ -1,7 +1,14 @@
 aiogram==3.3.0
-openai==1.11.0
+# Pin openai to a version prior to 1.0.0 to retain ChatCompletion API used in our code.
+openai==0.28.1
 python-dotenv==1.0.0
 SQLAlchemy==2.0.29
 aiosqlite==0.19.0
+
+# Pin pydantic to a version compatible with aiogram 3.3.0.
+# Aiogram 3.3.0 depends on pydantic>=2.4 and <2.6.4, so specifying
+# pydantic==2.5.3 satisfies this constraint and avoids dependency
+# resolution conflicts during deployment on platforms like Heroku.
 pydantic==2.5.3
+
 uvicorn==0.29.0
