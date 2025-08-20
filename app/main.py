@@ -22,7 +22,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, FSInputFile, PhotoSize,
                            InputMediaPhoto, LabeledPrice, PreCheckoutQuery,
                            SuccessfulPayment, URLInputFile, InlineKeyboardMarkup,
-                           InlineKeyboardButton)
+                           InlineKeyboardButton, BotCommand)
 
 from .config import Config
 from .database import (
@@ -225,19 +225,19 @@ async def callback_handler(
         await state.set_state(Form.pause_waiting_input)
         await callback.answer()
     elif data == "show_balance":
-        # Показываем баланс токенов и возможность получить бонус
+        # Показываем баланс токенов. Ссылку на рефералку выводим в отдельном разделе.
         async with async_session_factory() as session:
             user = await get_user(session, user_id)
+            # Обновим реферальный код при необходимости, но не показываем ссылку здесь
             ref_code = user.referral_code or generate_referral_code(user_id)
             if not user.referral_code:
                 user.referral_code = ref_code
                 await session.commit()
-            link = f"https://t.me/{(await bot.get_me()).username}?start=ref_{user_id}"
             text = (
                 f"\U0001F4B0 Твой баланс: {user.credits} токен(ов).\n"
                 "1 токен = 1 ответ Валеры.\n"
                 f"Пригласи друга и вы оба получите +{config.referral_bonus} токенов!\n"
-                f"Ваша ссылка: {link}\n\n"
+                "Чтобы узнать свою персональную ссылку, перейди в раздел ‘Реферальная ссылка’.\n\n"
                 "Чтобы продолжить общение, пополни баланс или пригласи друга."
             )
             await callback.message.answer(text)
@@ -371,29 +371,41 @@ async def handle_chat_input(
             return
         # Gather text from message or photos
         user_text_parts: List[str] = []
+        encoded_images: List[str] = []
         if message.text:
             user_text_parts.append(message.text)
-        # handle photos: download each and base64 encode
         if message.photo:
             for photo in message.photo:
                 file = await bot.get_file(photo.file_id)
-                file_path = file.file_path
-                downloaded = await bot.download_file(file_path)
+                downloaded = await bot.download_file(file.file_path)
                 b = downloaded.read()
                 encoded = base64.b64encode(b).decode()
-                # We embed as markdown for the model (not used here). We'll just append placeholder
+                encoded_images.append(encoded)
+                # Append a placeholder for logging
                 user_text_parts.append("[изображение]")
         combined = "\n".join(user_text_parts)
         # Log the user's message in the history
         await log_message(session, user_id, "user", combined)
-        # Build prompt for conversation analysis. Use plain text result.
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": "Я отправлю тебе переписку с девушкой, помоги мне её проанализировать.\n\nПереписка:\n" + combined,
-            },
-        ]
+        # Build messages for the AI; include images when available
+        if encoded_images:
+            content = []
+            # Text part
+            content.append({"type": "text", "text": "Я отправлю тебе переписку с девушкой, помоги мне её проанализировать.\n\nПереписка:\n" + combined})
+            # Add each image
+            for img in encoded_images:
+                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": "Я отправлю тебе переписку с девушкой, помоги мне её проанализировать.\n\nПереписка:\n" + combined,
+                },
+            ]
         try:
             # Show typing indicator while waiting for AI response
             try:
@@ -443,6 +455,7 @@ async def handle_profile_input(
             return
         # Extract text and images
         user_text_parts: List[str] = []
+        encoded_images: List[str] = []
         if message.text:
             user_text_parts.append(message.text)
         if message.photo:
@@ -451,9 +464,21 @@ async def handle_profile_input(
                 downloaded = await bot.download_file(file.file_path)
                 b = downloaded.read()
                 encoded = base64.b64encode(b).decode()
+                encoded_images.append(encoded)
                 user_text_parts.append("[фото]")
         combined = "\n".join(user_text_parts)
-        messages = build_profile_prompt(combined)
+        # Build profile messages; include images if available
+        if encoded_images:
+            content = []
+            content.append({"type": "text", "text": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nДанные:\n" + combined})
+            for img in encoded_images:
+                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ]
+        else:
+            messages = build_profile_prompt(combined)
         try:
             # Show typing indicator while waiting for AI response
             try:
@@ -501,6 +526,7 @@ async def handle_girl_profile_input(
             await state.clear()
             return
         parts: List[str] = []
+        encoded_images: List[str] = []
         if message.text:
             parts.append(message.text)
         if message.photo:
@@ -508,18 +534,30 @@ async def handle_girl_profile_input(
                 file = await bot.get_file(photo.file_id)
                 downloaded = await bot.download_file(file.file_path)
                 b = downloaded.read()
-                # we don't send base64 to openai; just indicate photo presence
+                encoded = base64.b64encode(b).decode()
+                encoded_images.append(encoded)
                 parts.append("[фото]")
         combined = "\n".join(parts)
         # Log the user's message
         await log_message(session, user_id, "user", combined)
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": "Я отправлю тебе профиль девушки, подскажи что к чему там.\n\nПрофиль:\n" + combined,
-            },
-        ]
+        # Build messages; include images if present
+        if encoded_images:
+            content = []
+            content.append({"type": "text", "text": "Я отправлю тебе профиль девушки, подскажи что к чему там.\n\nПрофиль:\n" + combined})
+            for img in encoded_images:
+                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": "Я отправлю тебе профиль девушки, подскажи что к чему там.\n\nПрофиль:\n" + combined,
+                },
+            ]
         try:
             try:
                 await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
@@ -562,6 +600,7 @@ async def handle_my_profile_input(
             await state.clear()
             return
         parts: List[str] = []
+        encoded_images: List[str] = []
         if message.text:
             parts.append(message.text)
         if message.photo:
@@ -569,17 +608,30 @@ async def handle_my_profile_input(
                 file = await bot.get_file(photo.file_id)
                 downloaded = await bot.download_file(file.file_path)
                 b = downloaded.read()
+                encoded = base64.b64encode(b).decode()
+                encoded_images.append(encoded)
                 parts.append("[фото]")
         combined = "\n".join(parts)
         # Log the user's message
         await log_message(session, user_id, "user", combined)
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nПрофиль:\n" + combined,
-            },
-        ]
+        # Build messages; include images if present
+        if encoded_images:
+            content = []
+            content.append({"type": "text", "text": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nПрофиль:\n" + combined})
+            for img in encoded_images:
+                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nПрофиль:\n" + combined,
+                },
+            ]
         try:
             try:
                 await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
@@ -622,6 +674,7 @@ async def handle_pause_input(
             await state.clear()
             return
         parts: List[str] = []
+        encoded_images: List[str] = []
         if message.text:
             parts.append(message.text)
         if message.photo:
@@ -629,17 +682,30 @@ async def handle_pause_input(
                 file = await bot.get_file(photo.file_id)
                 downloaded = await bot.download_file(file.file_path)
                 b = downloaded.read()
+                encoded = base64.b64encode(b).decode()
+                encoded_images.append(encoded)
                 parts.append("[фото]")
         combined = "\n".join(parts)
         # Log the user's message
         await log_message(session, user_id, "user", combined)
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": "Я общаюсь с девушкой и возникла неловкая пауза, подкинь какие-нибудь темы для беседы, чтобы её заполнить.\n\nКонтекст:\n" + combined,
-            },
-        ]
+        # Build messages; include images if present
+        if encoded_images:
+            content = []
+            content.append({"type": "text", "text": "Я общаюсь с девушкой и возникла неловкая пауза, подкинь какие-нибудь темы для беседы, чтобы её заполнить.\n\nКонтекст:\n" + combined})
+            for img in encoded_images:
+                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": "Я общаюсь с девушкой и возникла неловкая пауза, подкинь какие-нибудь темы для беседы, чтобы её заполнить.\n\nКонтекст:\n" + combined,
+                },
+            ]
         try:
             try:
                 await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
@@ -682,6 +748,7 @@ async def handle_free_chat(
             await message.answer("У тебя закончились токены. Пригласи друга или пополни баланс.")
             return
         parts: List[str] = []
+        encoded_images: List[str] = []
         if message.text:
             parts.append(message.text)
         if message.photo:
@@ -689,15 +756,28 @@ async def handle_free_chat(
                 file = await bot.get_file(photo.file_id)
                 downloaded = await bot.download_file(file.file_path)
                 b = downloaded.read()
+                encoded = base64.b64encode(b).decode()
+                encoded_images.append(encoded)
                 parts.append("[фото]")
         combined = "\n".join(parts)
         # Log the user's message
         async with async_session_factory() as log_session:
             await log_message(log_session, user_id, "user", combined)
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": combined},
-        ]
+        # Build messages; include images if present
+        if encoded_images:
+            content = []
+            content.append({"type": "text", "text": combined})
+            for img in encoded_images:
+                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": combined},
+            ]
         try:
             try:
                 await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
@@ -764,6 +844,107 @@ async def setup_bot() -> None:
         """Wrapper for free chat messages outside any state."""
         await handle_free_chat(message, bot, config, openai_client, state)
 
+    # Commands for side menu. Each command replicates the callback actions but is triggered via /command.
+    async def start_chat_cmd(message: Message, state: FSMContext) -> None:
+        # Membership check
+        if not await ensure_membership(bot, config, message.from_user.id):
+            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+            return
+        await message.answer(
+            "Ок! Пришли переписку — текстом или скринами. Я помогу понять, как она к тебе относится, и предложу лучшие ответы."
+        )
+        await state.set_state(Form.chat_waiting_input)
+
+    async def girl_profile_cmd(message: Message, state: FSMContext) -> None:
+        if not await ensure_membership(bot, config, message.from_user.id):
+            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+            return
+        await message.answer(
+            "Пришли анкету девушки: текст, фото или скрин. Я расскажу, какая она, чем увлекается и как лучше завести разговор."
+        )
+        await state.set_state(Form.girl_profile_waiting_input)
+
+    async def my_profile_cmd(message: Message, state: FSMContext) -> None:
+        if not await ensure_membership(bot, config, message.from_user.id):
+            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+            return
+        await message.answer(
+            "Давай посмотрим на твой профиль. Пришли текст, фото или скрины, и я скажу, что супер, а что можно подтянуть."
+        )
+        await state.set_state(Form.my_profile_waiting_input)
+
+    async def awkward_pauses_cmd(message: Message, state: FSMContext) -> None:
+        if not await ensure_membership(bot, config, message.from_user.id):
+            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+            return
+        await message.answer(
+            "Опиши, где вы сейчас (чат или свидание) и что обсуждали. Я подкину темы, чтобы заполнить паузу и поддержать вайб."
+        )
+        await state.set_state(Form.pause_waiting_input)
+
+    async def show_balance_cmd(message: Message) -> None:
+        # Replicate balance display without referral link
+        user_id = message.from_user.id
+        if not await ensure_membership(bot, config, user_id):
+            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+            return
+        async with async_session_factory() as session:
+            user = await get_user(session, user_id)
+            if not user:
+                await message.answer("Не удалось найти пользователя. Введите /start.")
+                return
+            # ensure ref code exists but don't display link here
+            if not user.referral_code:
+                user.referral_code = generate_referral_code(user_id)
+                await session.commit()
+            await message.answer(
+                f"\U0001F4B0 Твой баланс: {user.credits} токен(ов).\n"
+                "1 токен = 1 ответ Валеры.\n"
+                f"Пригласи друга и вы оба получите +{config.referral_bonus} токенов!\n"
+                "Чтобы узнать свою персональную ссылку, перейди в раздел ‘Реферальная ссылка’.\n\n"
+                "Чтобы продолжить общение, пополни баланс или пригласи друга."
+            )
+
+    async def buy_credits_cmd(message: Message) -> None:
+        # Show packages
+        if not await ensure_membership(bot, config, message.from_user.id):
+            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+            return
+        kb = [
+            [
+                InlineKeyboardButton(
+                    text=f"{credits} токенов — {amount}\u2B50",
+                    callback_data=f"buy_{slug}",
+                )
+            ]
+            for slug, (credits, amount, _desc) in config.pricing.items()
+        ]
+        kb.append([InlineKeyboardButton(text="Назад", callback_data="back_main")])
+        await message.answer(
+            "Выбери пакет для пополнения:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
+        )
+
+    async def show_referral_cmd(message: Message) -> None:
+        # Show referral link
+        user_id = message.from_user.id
+        if not await ensure_membership(bot, config, user_id):
+            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+            return
+        async with async_session_factory() as session:
+            user = await get_user(session, user_id)
+            if not user:
+                await message.answer("Не удалось найти пользователя. Введите /start.")
+                return
+            if not user.referral_code:
+                user.referral_code = generate_referral_code(user_id)
+                await session.commit()
+            link = f"https://t.me/{(await bot.get_me()).username}?start=ref_{user_id}"
+            await message.answer(
+                f"\U0001F517 Твоя персональная реферальная ссылка:\n{link}\n\n"
+                f"Пригласи друга и вы оба получите +{config.referral_bonus} токенов!"
+            )
+
     # Register the wrapper handlers with appropriate filters.
     router.message.register(start_handler, Command(commands=["start"]))
     router.callback_query.register(callback_query_handler)
@@ -780,7 +961,30 @@ async def setup_bot() -> None:
     # Free chat (catch-all) should be registered last so it doesn't override other handlers
     router.message.register(free_chat_wrapper)
 
+    # Register command handlers for side menu commands
+    router.message.register(start_chat_cmd, Command(commands=["start_chat"]))
+    router.message.register(girl_profile_cmd, Command(commands=["girl_profile"]))
+    router.message.register(my_profile_cmd, Command(commands=["my_profile"]))
+    router.message.register(awkward_pauses_cmd, Command(commands=["awkward_pauses"]))
+    router.message.register(show_balance_cmd, Command(commands=["show_balance"]))
+    router.message.register(buy_credits_cmd, Command(commands=["buy_credits"]))
+    router.message.register(show_referral_cmd, Command(commands=["show_referral"]))
+
     dp.include_router(router)
+    # Set bot commands so users can access a persistent side menu
+    commands = [
+        BotCommand(command="start_chat", description="Разобрать переписку"),
+        BotCommand(command="girl_profile", description="Анализ профиля девушки"),
+        BotCommand(command="my_profile", description="Анализ моего профиля"),
+        BotCommand(command="awkward_pauses", description="Неловкие паузы"),
+        BotCommand(command="show_balance", description="Мой баланс"),
+        BotCommand(command="buy_credits", description="Пополнить баланс"),
+        BotCommand(command="show_referral", description="Реферальная ссылка"),
+    ]
+    try:
+        await bot.set_my_commands(commands)
+    except Exception as exc:
+        logger.warning("Failed to set bot commands: %s", exc)
     # Start polling
     await dp.start_polling(bot)
 
