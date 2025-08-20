@@ -67,8 +67,18 @@ async def handle_start(
     config: Config,
 ) -> None:
     """Handle the /start command, including referral codes and membership gating."""
-    command: CommandObject = message.command
-    arg = command.args if command else None
+    # Extract any argument passed after /start manually, rather than relying on
+    # ``message.command`` which may not be present on the Message object. The
+    # Command filter passes the message through without attaching a ``command``
+    # attribute, so attempting to access ``message.command`` raises
+    # ``AttributeError``. Instead, parse the text of the message and look
+    # for a token after the command name.  ``arg`` will be ``None`` if no
+    # argument was supplied.
+    arg = None
+    if message.text:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) > 1:
+            arg = parts[1]
     telegram_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
