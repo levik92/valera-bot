@@ -1,5 +1,4 @@
 """
-
 Entry point for the Valera bot.
 
 This module wires together the configuration, database models, OpenAI API
@@ -35,9 +34,10 @@ from .database import (
     deduct_credits,
     set_membership,
     grant_referral_bonus,
+    log_message,
 )
 from .openai_client import OpenAIClient
-from .prompts import build_chat_prompt, build_profile_prompt
+from .prompts import build_chat_prompt, build_profile_prompt, SYSTEM_PROMPT
 from .utils import generate_referral_code
 
 logging.basicConfig(level=logging.INFO)
@@ -45,8 +45,15 @@ logger = logging.getLogger(__name__)
 
 
 class Form(StatesGroup):
+    """Conversation states for different user flows."""
+    # Ожидание текста или скринов для разбора переписки
     chat_waiting_input = State()
-    profile_waiting_input = State()
+    # Ожидание анкеты девушки
+    girl_profile_waiting_input = State()
+    # Ожидание анкеты пользователя
+    my_profile_waiting_input = State()
+    # Ожидание описания неловкой паузы или контекста
+    pause_waiting_input = State()
 
 
 async def ensure_membership(bot: Bot, config: Config, user_id: int) -> bool:
@@ -139,18 +146,22 @@ async def handle_start(
                 # grant referral bonus if applicable
                 await grant_referral_bonus(session, user, config.referral_bonus, config.referral_bonus)
             # greet
+            # Приветственное сообщение и основное меню. Пользователь может выбрать кнопку
+            # либо просто написать сообщение в чат, и Валера его проанализирует.
+            menu_kb = [
+                [InlineKeyboardButton(text="Разобрать переписку", callback_data="start_chat")],
+                [InlineKeyboardButton(text="Анализ профиля девушки", callback_data="girl_profile")],
+                [InlineKeyboardButton(text="Анализ моего профиля", callback_data="my_profile")],
+                [InlineKeyboardButton(text="Неловкие паузы", callback_data="awkward_pauses")],
+                [InlineKeyboardButton(text="Мой баланс", callback_data="show_balance")],
+                [InlineKeyboardButton(text="Пополнить баланс", callback_data="buy_credits")],
+                [InlineKeyboardButton(text="Реферальная ссылка", callback_data="show_referral")],
+            ]
             await message.answer(
                 f"Привет, {first_name or 'друг'}! Я Валера, твой wingman.\n"
-                "Готов помочь оценить переписку или анкету. \n"
-                "Используй кнопки ниже:",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(text="Разобрать переписку", callback_data="start_chat")],
-                        [InlineKeyboardButton(text="Анализ профиля", callback_data="start_profile")],
-                        [InlineKeyboardButton(text="Мой баланс", callback_data="show_balance")],
-                        [InlineKeyboardButton(text="Пополнить баланс", callback_data="buy_credits")],
-                    ]
-                ),
+                "Я могу проанализировать переписку, анкету, предложить темы для разговора или просто поболтать.\n"
+                "Выбери пункт меню ниже или напиши, в чём нужна помощь:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=menu_kb),
             )
 
 
@@ -186,26 +197,48 @@ async def callback_handler(
             else:
                 await callback.answer("Похоже, ты ещё не подписан", show_alert=True)
     elif data == "start_chat":
-        await callback.message.answer("Отправь текст переписки или фотографии, которые нужно проанализировать. После получения я пришлю результат.")
+        # Prompt the user to send the conversation.  Keep the tone friendly and clear.
+        await callback.message.answer(
+            "Ок! Пришли переписку — текстом или скринами. Я помогу понять, как она к тебе относится, и предложу лучшие ответы."
+        )
         await state.set_state(Form.chat_waiting_input)
         await callback.answer()
-    elif data == "start_profile":
-        await callback.message.answer("Отправь свою анкету: фотографии и био. После получения я пришлю результат.")
-        await state.set_state(Form.profile_waiting_input)
+    elif data == "girl_profile":
+        # Пользователь хочет проанализировать анкету девушки
+        await callback.message.answer(
+            "Пришли анкету девушки: текст, фото или скрин. Я расскажу, какая она, чем увлекается и как лучше завести разговор."
+        )
+        await state.set_state(Form.girl_profile_waiting_input)
+        await callback.answer()
+    elif data == "my_profile":
+        # Пользователь хочет проанализировать свою анкету
+        await callback.message.answer(
+            "Давай посмотрим на твой профиль. Пришли текст, фото или скрины, и я скажу, что супер, а что можно подтянуть."
+        )
+        await state.set_state(Form.my_profile_waiting_input)
+        await callback.answer()
+    elif data == "awkward_pauses":
+        # Пользователь хочет закрыть неловкую паузу
+        await callback.message.answer(
+            "Опиши, где вы сейчас (чат или свидание) и что обсуждали. Я подкину темы, чтобы заполнить паузу и поддержать вайб."
+        )
+        await state.set_state(Form.pause_waiting_input)
         await callback.answer()
     elif data == "show_balance":
+        # Показываем баланс токенов и возможность получить бонус
         async with async_session_factory() as session:
             user = await get_user(session, user_id)
             ref_code = user.referral_code or generate_referral_code(user_id)
-            # In case referral_code was None on creation
             if not user.referral_code:
                 user.referral_code = ref_code
                 await session.commit()
             link = f"https://t.me/{(await bot.get_me()).username}?start=ref_{user_id}"
             text = (
-                f"У тебя {user.credits} генераций.\n"
-                f"Твоя реферальная ссылка: {link}\n"
-                f"За каждого приглашённого — +{config.referral_bonus} тебе и +{config.referral_bonus} другу"
+                f"\U0001F4B0 Твой баланс: {user.credits} токен(ов).\n"
+                "1 токен = 1 ответ Валеры.\n"
+                f"Пригласи друга и вы оба получите +{config.referral_bonus} токенов!\n"
+                f"Ваша ссылка: {link}\n\n"
+                "Чтобы продолжить общение, пополни баланс или пригласи друга."
             )
             await callback.message.answer(text)
             await callback.answer()
@@ -214,7 +247,7 @@ async def callback_handler(
         kb = [
             [
                 InlineKeyboardButton(
-                    text=f"{credits} ген. — {amount/100:.2f}⭐", callback_data=f"buy_{slug}"
+                    text=f"{credits} токенов — {amount}⭐", callback_data=f"buy_{slug}"
                 )
             ]
             for slug, (credits, amount, _desc) in config.pricing.items()
@@ -249,18 +282,37 @@ async def callback_handler(
         )
         await callback.answer()
     elif data == "back_main":
+        # Показать главное меню. Предложите выбрать пункт или задать вопрос прямо текстом.
+        menu_kb = [
+            [InlineKeyboardButton(text="Разобрать переписку", callback_data="start_chat")],
+            [InlineKeyboardButton(text="Анализ профиля девушки", callback_data="girl_profile")],
+            [InlineKeyboardButton(text="Анализ моего профиля", callback_data="my_profile")],
+            [InlineKeyboardButton(text="Неловкие паузы", callback_data="awkward_pauses")],
+            [InlineKeyboardButton(text="Мой баланс", callback_data="show_balance")],
+            [InlineKeyboardButton(text="Пополнить баланс", callback_data="buy_credits")],
+            [InlineKeyboardButton(text="Реферальная ссылка", callback_data="show_referral")],
+        ]
         await callback.message.answer(
-            "Главное меню:",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="Разобрать переписку", callback_data="start_chat")],
-                    [InlineKeyboardButton(text="Анализ профиля", callback_data="start_profile")],
-                    [InlineKeyboardButton(text="Мой баланс", callback_data="show_balance")],
-                    [InlineKeyboardButton(text="Пополнить баланс", callback_data="buy_credits")],
-                ]
-            ),
+            "Главное меню. Выбери кнопку или просто напиши мне, в чём нужна помощь:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=menu_kb),
         )
         await callback.answer()
+
+    elif data == "show_referral":
+        # Отображаем реферальную ссылку пользователя и условия бонуса
+        async with async_session_factory() as session:
+            user = await get_user(session, user_id)
+            ref_code = user.referral_code or generate_referral_code(user_id)
+            if not user.referral_code:
+                user.referral_code = ref_code
+                await session.commit()
+            link = f"https://t.me/{(await bot.get_me()).username}?start=ref_{user_id}"
+            text = (
+                f"\U0001F517 Твоя персональная реферальная ссылка:\n{link}\n\n"
+                f"Пригласи друга и вы оба получите +{config.referral_bonus} токенов!"
+            )
+            await callback.message.answer(text)
+            await callback.answer()
 
 
 async def handle_pre_checkout(query: PreCheckoutQuery, bot: Bot, config: Config) -> None:
@@ -286,7 +338,7 @@ async def handle_successful_payment(
     async with async_session_factory() as session:
         user = await get_user(session, user_id)
         await add_credits(session, user, credits)
-    await message.answer(f"Оплата прошла успешно! Начислено {credits} генераций.")
+    await message.answer(f"Оплата прошла успешно! Начислено {credits} токенов.")
 
 
 async def handle_chat_input(
@@ -313,7 +365,7 @@ async def handle_chat_input(
             return
         if user.credits <= 0:
             await message.answer(
-                "У тебя закончились генерации. Пригласи друга или пополни баланс через /buy."
+                "У тебя закончились токены. Пригласи друга или пополни баланс."
             )
             await state.clear()
             return
@@ -332,28 +384,34 @@ async def handle_chat_input(
                 # We embed as markdown for the model (not used here). We'll just append placeholder
                 user_text_parts.append("[изображение]")
         combined = "\n".join(user_text_parts)
-        # Build prompt and call OpenAI
-        messages = build_chat_prompt(combined)
+        # Log the user's message in the history
+        await log_message(session, user_id, "user", combined)
+        # Build prompt for conversation analysis. Use plain text result.
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": "Я отправлю тебе переписку с девушкой, помоги мне её проанализировать.\n\nПереписка:\n" + combined,
+            },
+        ]
         try:
             # Show typing indicator while waiting for AI response
             try:
                 await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
             except Exception:
-                # Ignore failure to send typing action
                 pass
             result = await openai_client.chat(messages)
         except Exception as exc:
-            logger.error("OpenAI chat failed: %s", exc)
-            await message.answer(
-                "Упс! Сейчас не получилось получить ответ. Давай попробуем ещё раз через пару минут."
-            )
+            logger.error("OpenAI chat analysis failed: %s", exc)
+            await message.answer("Что-то пошло не так, попробуй ещё раз через пару минут.")
             await state.clear()
             return
-        # Deduct credit
+        # Deduct one token
         await deduct_credits(session, user, 1)
-        # Pretty print the JSON for readability
-        formatted = json.dumps(result, ensure_ascii=False, indent=2)
-        await message.answer(f"Результат анализа:\n<pre>{formatted}</pre>", parse_mode="HTML")
+        # Log Valera's reply before sending
+        await log_message(session, user_id, "valera", result)
+        # Send plain text result
+        await message.answer(result)
         await state.clear()
 
 
@@ -379,7 +437,7 @@ async def handle_profile_input(
             return
         if user.credits <= 0:
             await message.answer(
-                "У тебя закончились генерации. Пригласи друга или пополни баланс через /buy."
+                "У тебя закончились токены. Пригласи друга или пополни баланс."
             )
             await state.clear()
             return
@@ -410,10 +468,251 @@ async def handle_profile_input(
             )
             await state.clear()
             return
+        # Deduct one token and log Valera's reply
         await deduct_credits(session, user, 1)
-        formatted = json.dumps(result, ensure_ascii=False, indent=2)
-        await message.answer(f"Результат анализа:\n<pre>{formatted}</pre>", parse_mode="HTML")
+        await log_message(session, user_id, "valera", result)
+        # Send plain text result without JSON formatting
+        await message.answer(result)
         await state.clear()
+
+
+async def handle_girl_profile_input(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    config: Config,
+    openai_client: OpenAIClient,
+) -> None:
+    """Handle input when analysing a girl's profile."""
+    user_id = message.from_user.id
+    # Check membership
+    if not await ensure_membership(bot, config, user_id):
+        await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+        await state.clear()
+        return
+    async with async_session_factory() as session:
+        user = await get_user(session, user_id)
+        if not user:
+            await message.answer("Не удалось найти пользователя. Введите /start.")
+            await state.clear()
+            return
+        if user.credits <= 0:
+            await message.answer("У тебя закончились токены. Пригласи друга или пополни баланс.")
+            await state.clear()
+            return
+        parts: List[str] = []
+        if message.text:
+            parts.append(message.text)
+        if message.photo:
+            for photo in message.photo:
+                file = await bot.get_file(photo.file_id)
+                downloaded = await bot.download_file(file.file_path)
+                b = downloaded.read()
+                # we don't send base64 to openai; just indicate photo presence
+                parts.append("[фото]")
+        combined = "\n".join(parts)
+        # Log the user's message
+        await log_message(session, user_id, "user", combined)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": "Я отправлю тебе профиль девушки, подскажи что к чему там.\n\nПрофиль:\n" + combined,
+            },
+        ]
+        try:
+            try:
+                await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+            except Exception:
+                pass
+            result = await openai_client.chat(messages)
+        except Exception as exc:
+            logger.error("OpenAI girl profile analysis failed: %s", exc)
+            await message.answer("Что-то пошло не так, попробуй ещё раз через пару минут.")
+            await state.clear()
+            return
+        await deduct_credits(session, user, 1)
+        # Log Valera's reply
+        await log_message(session, user_id, "valera", result)
+        await message.answer(result)
+        await state.clear()
+
+
+async def handle_my_profile_input(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    config: Config,
+    openai_client: OpenAIClient,
+) -> None:
+    """Handle input when analysing the user's own profile."""
+    user_id = message.from_user.id
+    if not await ensure_membership(bot, config, user_id):
+        await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+        await state.clear()
+        return
+    async with async_session_factory() as session:
+        user = await get_user(session, user_id)
+        if not user:
+            await message.answer("Не удалось найти пользователя. Введите /start.")
+            await state.clear()
+            return
+        if user.credits <= 0:
+            await message.answer("У тебя закончились токены. Пригласи друга или пополни баланс.")
+            await state.clear()
+            return
+        parts: List[str] = []
+        if message.text:
+            parts.append(message.text)
+        if message.photo:
+            for photo in message.photo:
+                file = await bot.get_file(photo.file_id)
+                downloaded = await bot.download_file(file.file_path)
+                b = downloaded.read()
+                parts.append("[фото]")
+        combined = "\n".join(parts)
+        # Log the user's message
+        await log_message(session, user_id, "user", combined)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nПрофиль:\n" + combined,
+            },
+        ]
+        try:
+            try:
+                await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+            except Exception:
+                pass
+            result = await openai_client.chat(messages)
+        except Exception as exc:
+            logger.error("OpenAI my profile analysis failed: %s", exc)
+            await message.answer("Что-то пошло не так, попробуй ещё раз через пару минут.")
+            await state.clear()
+            return
+        await deduct_credits(session, user, 1)
+        # Log Valera's reply
+        await log_message(session, user_id, "valera", result)
+        await message.answer(result)
+        await state.clear()
+
+
+async def handle_pause_input(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    config: Config,
+    openai_client: OpenAIClient,
+) -> None:
+    """Handle input when the user needs topics for awkward pauses."""
+    user_id = message.from_user.id
+    if not await ensure_membership(bot, config, user_id):
+        await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+        await state.clear()
+        return
+    async with async_session_factory() as session:
+        user = await get_user(session, user_id)
+        if not user:
+            await message.answer("Не удалось найти пользователя. Введите /start.")
+            await state.clear()
+            return
+        if user.credits <= 0:
+            await message.answer("У тебя закончились токены. Пригласи друга или пополни баланс.")
+            await state.clear()
+            return
+        parts: List[str] = []
+        if message.text:
+            parts.append(message.text)
+        if message.photo:
+            for photo in message.photo:
+                file = await bot.get_file(photo.file_id)
+                downloaded = await bot.download_file(file.file_path)
+                b = downloaded.read()
+                parts.append("[фото]")
+        combined = "\n".join(parts)
+        # Log the user's message
+        await log_message(session, user_id, "user", combined)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": "Я общаюсь с девушкой и возникла неловкая пауза, подкинь какие-нибудь темы для беседы, чтобы её заполнить.\n\nКонтекст:\n" + combined,
+            },
+        ]
+        try:
+            try:
+                await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+            except Exception:
+                pass
+            result = await openai_client.chat(messages)
+        except Exception as exc:
+            logger.error("OpenAI pause analysis failed: %s", exc)
+            await message.answer("Что-то пошло не так, попробуй ещё раз через пару минут.")
+            await state.clear()
+            return
+        await deduct_credits(session, user, 1)
+        # Log Valera's reply
+        await log_message(session, user_id, "valera", result)
+        await message.answer(result)
+        await state.clear()
+
+
+async def handle_free_chat(
+    message: Message,
+    bot: Bot,
+    config: Config,
+    openai_client: OpenAIClient,
+    state: FSMContext,
+) -> None:
+    """Handle free chat when no specific state is active."""
+    # Ignore commands
+    if message.text and message.text.startswith('/'):
+        return
+    user_id = message.from_user.id
+    if not await ensure_membership(bot, config, user_id):
+        await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+        return
+    async with async_session_factory() as session:
+        user = await get_user(session, user_id)
+        if not user:
+            await message.answer("Не удалось найти пользователя. Введите /start.")
+            return
+        if user.credits <= 0:
+            await message.answer("У тебя закончились токены. Пригласи друга или пополни баланс.")
+            return
+        parts: List[str] = []
+        if message.text:
+            parts.append(message.text)
+        if message.photo:
+            for photo in message.photo:
+                file = await bot.get_file(photo.file_id)
+                downloaded = await bot.download_file(file.file_path)
+                b = downloaded.read()
+                parts.append("[фото]")
+        combined = "\n".join(parts)
+        # Log the user's message
+        async with async_session_factory() as log_session:
+            await log_message(log_session, user_id, "user", combined)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": combined},
+        ]
+        try:
+            try:
+                await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+            except Exception:
+                pass
+            result = await openai_client.chat(messages)
+        except Exception as exc:
+            logger.error("OpenAI free chat failed: %s", exc)
+            await message.answer("Что-то пошло не так, попробуй ещё раз через пару минут.")
+            return
+        await deduct_credits(session, user, 1)
+        # Log Valera's reply
+        async with async_session_factory() as log_session:
+            await log_message(log_session, user_id, "valera", result)
+        await message.answer(result)
 
 
 async def setup_bot() -> None:
@@ -449,19 +748,37 @@ async def setup_bot() -> None:
         """Wrapper for chat input state that injects bot, config and openai_client."""
         await handle_chat_input(message, state, bot, config, openai_client)
 
-    async def profile_input_handler(message: Message, state: FSMContext) -> None:
-        """Wrapper for profile input state that injects bot, config and openai_client."""
-        await handle_profile_input(message, state, bot, config, openai_client)
+    async def girl_profile_input_handler(message: Message, state: FSMContext) -> None:
+        """Wrapper for girl profile state."""
+        await handle_girl_profile_input(message, state, bot, config, openai_client)
+
+    async def my_profile_input_handler(message: Message, state: FSMContext) -> None:
+        """Wrapper for user's own profile state."""
+        await handle_my_profile_input(message, state, bot, config, openai_client)
+
+    async def pause_input_handler(message: Message, state: FSMContext) -> None:
+        """Wrapper for pause state."""
+        await handle_pause_input(message, state, bot, config, openai_client)
+
+    async def free_chat_wrapper(message: Message, state: FSMContext) -> None:
+        """Wrapper for free chat messages outside any state."""
+        await handle_free_chat(message, bot, config, openai_client, state)
 
     # Register the wrapper handlers with appropriate filters.
     router.message.register(start_handler, Command(commands=["start"]))
     router.callback_query.register(callback_query_handler)
     router.pre_checkout_query.register(pre_checkout_handler)
     router.message.register(successful_payment_handler, F.successful_payment)
-    # Chat state
+    # Chat analysis state
     router.message.register(chat_input_handler, StateFilter(Form.chat_waiting_input))
-    # Profile state
-    router.message.register(profile_input_handler, StateFilter(Form.profile_waiting_input))
+    # Girl profile analysis state
+    router.message.register(girl_profile_input_handler, StateFilter(Form.girl_profile_waiting_input))
+    # My profile analysis state
+    router.message.register(my_profile_input_handler, StateFilter(Form.my_profile_waiting_input))
+    # Pause topics state
+    router.message.register(pause_input_handler, StateFilter(Form.pause_waiting_input))
+    # Free chat (catch-all) should be registered last so it doesn't override other handlers
+    router.message.register(free_chat_wrapper)
 
     dp.include_router(router)
     # Start polling

@@ -72,6 +72,38 @@ class Session(Base):
     user = relationship("User", back_populates="sessions")
 
 
+# New table to store conversation history. Each message sent by the user or Valera
+# is recorded with its role and content. This allows us to reconstruct past
+# interactions or analyze usage patterns. Note: storing large amounts of
+# conversation data in SQLite (/tmp) is fine for short-lived sessions but
+# consider PostgreSQL for persistent storage.
+class Message(Base):
+    __tablename__ = "messages"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    role = Column(String(10), nullable=False)
+    content = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=func.now(), nullable=False)
+
+    user = relationship("User")
+
+
+async def log_message(session: AsyncSession, user_id: int, role: str, content: str) -> None:
+    """Persist a conversation message in the history table.
+
+    Args:
+        session: Active async session.
+        user_id: Telegram ID of the user associated with this message.
+        role: Either "user" or "valera" to indicate who sent the message.
+        content: The raw text of the message.
+
+    This helper creates a new Message instance and commits it to the database.
+    """
+    msg = Message(user_id=user_id, role=role, content=content)
+    session.add(msg)
+    await session.commit()
+
+
 async def init_db() -> None:
     """Create database tables if they do not exist."""
     async with engine.begin() as conn:

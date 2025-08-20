@@ -31,12 +31,18 @@ class Config:
 
     # Pricing table for available packages.  Key is slug used in invoices,
     # value is a tuple of (credits, amount_in_stars, description)
+    # Pricing table for available packages (credits, amount_in_stars, description).
+    # 1 токен = 1 ответ Валеры. Стоимость указана в звёздах (XTR) для телеграм-оплаты.
     pricing: dict[str, tuple[int, int, str]] = field(default_factory=lambda: {
-        "pack_50": (50, 499, "Пакет на 50 генераций"),
-        "pack_120": (120, 999, "Пакет на 120 генераций"),
-        "pack_300": (300, 1999, "Пакет на 300 генераций"),
+        "pack_50": (50, 199, "Пакет на 50 токенов"),
+        "pack_120": (120, 399, "Пакет на 120 токенов"),
+        "pack_300": (300, 899, "Пакет на 300 токенов"),
     })
 
-    initial_credits: int = field(default_factory=lambda: 5)
-    referral_bonus: int = field(default_factory=lambda: 10)
+    # Количество токенов, которое получает новый пользователь при первом запуске бота.
+    # Эти токены не восполняются автоматически, их можно получить через рефералов или покупку.
+    initial_credits: int = field(default_factory=lambda: 15)
+
+    # Бонусные токены, которые выдаются обоим при реферальном приглашении.
+    referral_bonus: int = field(default_factory=lambda: 15)
     currency: str = field(default_factory=lambda: "XTR")
