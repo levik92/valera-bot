@@ -15,7 +15,7 @@ import base64
 from typing import List, Optional
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.enums import ChatType
+from aiogram.enums import ChatType, ChatAction
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -334,10 +334,18 @@ async def handle_chat_input(
         # Build prompt and call OpenAI
         messages = build_chat_prompt(combined)
         try:
+            # Show typing indicator while waiting for AI response
+            try:
+                await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+            except Exception:
+                # Ignore failure to send typing action
+                pass
             result = await openai_client.chat(messages)
         except Exception as exc:
             logger.error("OpenAI chat failed: %s", exc)
-            await message.answer("Не удалось получить ответ от AI. Попробуй позже.")
+            await message.answer(
+                "Упс! Сейчас не получилось получить ответ. Давай попробуем ещё раз через пару минут."
+            )
             await state.clear()
             return
         # Deduct credit
@@ -388,10 +396,17 @@ async def handle_profile_input(
         combined = "\n".join(user_text_parts)
         messages = build_profile_prompt(combined)
         try:
+            # Show typing indicator while waiting for AI response
+            try:
+                await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+            except Exception:
+                pass
             result = await openai_client.chat(messages)
         except Exception as exc:
             logger.error("OpenAI profile analysis failed: %s", exc)
-            await message.answer("Не удалось получить ответ от AI. Попробуй позже.")
+            await message.answer(
+                "Упс! Сейчас не получилось получить ответ. Давай попробуем ещё раз через пару минут."
+            )
             await state.clear()
             return
         await deduct_credits(session, user, 1)
