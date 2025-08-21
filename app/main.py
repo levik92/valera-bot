@@ -13,14 +13,13 @@ import logging
 import os
 import base64
 from typing import List, Optional
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatType, ChatAction
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import (Message, CallbackQuery, FSInputFile, PhotoSize,
+from aiogram.types import (Message, CallbackQuery, FSInputFile, PhotoSize, ReplyKeyboardMarkup, KeyboardButton,
                            InputMediaPhoto, LabeledPrice, PreCheckoutQuery,
                            SuccessfulPayment, URLInputFile, InlineKeyboardMarkup,
                            InlineKeyboardButton, BotCommand)
@@ -128,11 +127,7 @@ async def handle_start(
                         [
                             InlineKeyboardButton(
                                 text="Подписаться",
-                                url=f"https://t.me/{config.telegram_channel_id.lstrip('@')
-    try:
-        await message.answer('Выбери действие или пришли переписку/скрин:\n\nЯ умею анализировать переписки, анкеты и помогать с темами для разговора.', reply_markup=build_main_menu())
-    except Exception:
-        pass}"
+                                url=f"https://t.me/{config.telegram_channel_id.lstrip('@')}"
                             )
                         ],
                         [
@@ -149,10 +144,10 @@ async def handle_start(
             if not user.is_member:
                 await set_membership(session, user, True)
                 # grant referral bonus if applicable
-                await grant_referral_bonus(session, user, config.referral_bonus, config.referral_bonus)
-            # greet
+                # greet
             # Приветственное сообщение и основное меню. Пользователь может выбрать кнопку
             # либо просто написать сообщение в чат, и Валера его проанализирует.
+            # Кнопки (инлайн) для быстрого выбора разделов
             menu_kb = [
                 [InlineKeyboardButton(text="Разобрать переписку", callback_data="start_chat")],
                 [InlineKeyboardButton(text="Анализ профиля девушки", callback_data="girl_profile")],
@@ -162,164 +157,25 @@ async def handle_start(
                 [InlineKeyboardButton(text="Пополнить баланс", callback_data="buy_credits")],
                 [InlineKeyboardButton(text="Реферальная ссылка", callback_data="show_referral")],
             ]
-            await message.answer(
-                f"Привет, {first_name or 'друг'}! Я Валера, твой wingman.\n"
-                "Я могу проанализировать переписку, анкету, предложить темы для разговора или просто поболтать.\n"
-                "Выбери пункт меню ниже или напиши, в чём нужна помощь:",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=menu_kb),
-            )
 
-
-async def callback_handler(
-    callback: CallbackQuery,
-    state: FSMContext,
-    bot: Bot,
-    config: Config,
-) -> None:
-    """Handle button callbacks from the inline keyboard."""
-    data = callback.data
-    user_id = callback.from_user.id
-    # membership check for any command except subscription check
-    if data != "check_subscription":
-        is_member = await ensure_membership(bot, config, user_id)
-        if not is_member:
-            await callback.answer("Нужно подписаться на канал", show_alert=True)
-            return
-
-    if data == "check_subscription":
-        # check membership when user clicks the button
-        is_member = await ensure_membership(bot, config, user_id)
-        async with async_session_factory() as session:
-            user = await get_user(session, user_id)
-            if is_member:
-                await set_membership(session, user, True)
-                # grant referral bonus if applicable
-                await grant_referral_bonus(session, user, config.referral_bonus, config.referral_bonus)
-                await callback.message.edit_text(
-                    "Спасибо за подписку! Теперь ты можешь пользоваться ботом.",
-                    reply_markup=None,
+            # Reply‑клавиатура возле поля ввода
+            try:
+                await message.answer(
+                    f"Привет, {message.from_user.first_name or 'друг'}! Я Валера, твой тренер по соблазнению.\n\n"
+                    "Выбери действие ниже или пришли переписку/скрин — разберу и подскажу, что ответить.",
+                    reply_markup=build_main_menu(),
                 )
-            else:
-                await callback.answer("Похоже, ты ещё не подписан", show_alert=True)
-    elif data == "start_chat":
-        # Prompt the user to send the conversation.  Keep the tone friendly and clear.
-        await callback.message.answer(
-            "Ок! Пришли переписку — текстом или скринами. Я помогу понять, как она к тебе относится, и предложу лучшие ответы."
-        )
-        await state.set_state(Form.chat_waiting_input)
-        await callback.answer()
-    elif data == "girl_profile":
-        # Пользователь хочет проанализировать анкету девушки
-        await callback.message.answer(
-            "Пришли анкету девушки: текст, фото или скрин. Я расскажу, какая она, чем увлекается и как лучше завести разговор."
-        )
-        await state.set_state(Form.girl_profile_waiting_input)
-        await callback.answer()
-    elif data == "my_profile":
-        # Пользователь хочет проанализировать свою анкету
-        await callback.message.answer(
-            "Давай посмотрим на твой профиль. Пришли текст, фото или скрины, и я скажу, что супер, а что можно подтянуть."
-        )
-        await state.set_state(Form.my_profile_waiting_input)
-        await callback.answer()
-    elif data == "awkward_pauses":
-        # Пользователь хочет закрыть неловкую паузу
-        await callback.message.answer(
-            "Опиши, где вы сейчас (чат или свидание) и что обсуждали. Я подкину темы, чтобы заполнить паузу и поддержать вайб."
-        )
-        await state.set_state(Form.pause_waiting_input)
-        await callback.answer()
-    elif data == "show_balance":
-        # Показываем баланс токенов. Ссылку на рефералку выводим в отдельном разделе.
-        async with async_session_factory() as session:
-            user = await get_user(session, user_id)
-            # Обновим реферальный код при необходимости, но не показываем ссылку здесь
-            ref_code = user.referral_code or generate_referral_code(user_id)
-            if not user.referral_code:
-                user.referral_code = ref_code
-                await session.commit()
-            text = (
-                f"\U0001F4B0 Твой баланс: {user.credits} токен(ов).\n"
-                "1 токен = 1 ответ Валеры.\n"
-                f"Пригласи друга и вы оба получите +{config.referral_bonus} токенов!\n"
-                "Чтобы узнать свою персональную ссылку, перейди в раздел ‘Реферальная ссылка’.\n\n"
-                "Чтобы продолжить общение, пополни баланс или пригласи друга."
-            )
-            await callback.message.answer(text)
-            await callback.answer()
-    elif data == "buy_credits":
-        # show packages
-        kb = [
-            [
-                InlineKeyboardButton(
-                    text=f"{credits} токенов — {amount}⭐", callback_data=f"buy_{slug}"
+            except Exception:
+                pass
+
+            # Также покажем инлайн‑клавиатуру (по желанию)
+            try:
+                await message.answer(
+                    "Или воспользуйся кнопками ниже:",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=menu_kb),
                 )
-            ]
-            for slug, (credits, amount, _desc) in config.pricing.items()
-        ]
-        kb.append([InlineKeyboardButton(text="Назад", callback_data="back_main")])
-        await callback.message.answer(
-            "Выбери пакет для пополнения:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
-        )
-        await callback.answer()
-    elif data and data.startswith("buy_"):
-        slug = data.split("_", 1)[1]
-        if slug not in config.pricing:
-            await callback.answer("Неизвестный пакет", show_alert=True)
-            return
-        credits, amount, description = config.pricing[slug]
-        prices = [LabeledPrice(label=description, amount=amount)]
-        payload = slug
-        title = description
-        await bot.send_invoice(
-            chat_id=user_id,
-            title=title,
-            description=f"Пополнение баланса: {description}",
-            payload=payload,
-            provider_token=config.provider_token,
-            currency=config.currency,
-            prices=prices,
-            # For digital goods we don't need to supply start_parameter
-            need_name=False,
-            need_email=False,
-            need_phone_number=False,
-        )
-        await callback.answer()
-    elif data == "back_main":
-        # Показать главное меню. Предложите выбрать пункт или задать вопрос прямо текстом.
-        menu_kb = [
-            [InlineKeyboardButton(text="Разобрать переписку", callback_data="start_chat")],
-            [InlineKeyboardButton(text="Анализ профиля девушки", callback_data="girl_profile")],
-            [InlineKeyboardButton(text="Анализ моего профиля", callback_data="my_profile")],
-            [InlineKeyboardButton(text="Неловкие паузы", callback_data="awkward_pauses")],
-            [InlineKeyboardButton(text="Мой баланс", callback_data="show_balance")],
-            [InlineKeyboardButton(text="Пополнить баланс", callback_data="buy_credits")],
-            [InlineKeyboardButton(text="Реферальная ссылка", callback_data="show_referral")],
-        ]
-        await callback.message.answer(
-            "Главное меню. Выбери кнопку или просто напиши мне, в чём нужна помощь:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=menu_kb),
-        )
-        await callback.answer()
-
-    elif data == "show_referral":
-        # Отображаем реферальную ссылку пользователя и условия бонуса
-        async with async_session_factory() as session:
-            user = await get_user(session, user_id)
-            ref_code = user.referral_code or generate_referral_code(user_id)
-            if not user.referral_code:
-                user.referral_code = ref_code
-                await session.commit()
-            link = f"https://t.me/{(await bot.get_me()).username}?start=ref_{user_id}"
-            text = (
-                f"\U0001F517 Твоя персональная реферальная ссылка:\n{link}\n\n"
-                f"Пригласи друга и вы оба получите +{config.referral_bonus} токенов!"
-            )
-            await callback.message.answer(text)
-            await callback.answer()
-
-
+            except Exception:
+                pass
 async def handle_pre_checkout(query: PreCheckoutQuery, bot: Bot, config: Config) -> None:
     """Answer the pre-checkout query; always approve payment."""
     await bot.answer_pre_checkout_query(query.id, ok=True)
@@ -398,7 +254,7 @@ async def handle_chat_input(
             content.append({"type": "text", "text": "Я отправлю тебе переписку с девушкой, помоги мне её проанализировать.\n\nПереписка:\n" + combined})
             # Add each image
             for img in encoded_images:
-                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -477,7 +333,7 @@ async def handle_profile_input(
             content = []
             content.append({"type": "text", "text": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nДанные:\n" + combined})
             for img in encoded_images:
-                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -550,7 +406,7 @@ async def handle_girl_profile_input(
             content = []
             content.append({"type": "text", "text": "Я отправлю тебе профиль девушки, подскажи что к чему там.\n\nПрофиль:\n" + combined})
             for img in encoded_images:
-                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -624,7 +480,7 @@ async def handle_my_profile_input(
             content = []
             content.append({"type": "text", "text": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nПрофиль:\n" + combined})
             for img in encoded_images:
-                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -698,7 +554,7 @@ async def handle_pause_input(
             content = []
             content.append({"type": "text", "text": "Я общаюсь с девушкой и возникла неловкая пауза, подкинь какие-нибудь темы для беседы, чтобы её заполнить.\n\nКонтекст:\n" + combined})
             for img in encoded_images:
-                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -773,7 +629,7 @@ async def handle_free_chat(
             content = []
             content.append({"type": "text", "text": combined})
             for img in encoded_images:
-                content.append({"type": "image_url", "image_url": "data:image/jpeg;base64," + img})
+                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -891,7 +747,7 @@ async def setup_bot() -> None:
         # Replicate balance display without referral link
         user_id = message.from_user.id
         if not await ensure_membership(bot, config, user_id):
-            await message.answer('Текущий баланс: ...\n(Реферальная ссылка — в разделе «Реферальная программа»)', reply_markup=build_main_menu())
+            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
             return
         async with async_session_factory() as session:
             user = await get_user(session, user_id)
@@ -964,6 +820,10 @@ async def setup_bot() -> None:
     # Pause topics state
     router.message.register(pause_input_handler, StateFilter(Form.pause_waiting_input))
     # Free chat (catch-all) should be registered last so it doesn't override other handlers
+    async def launch_valera_text(message: Message, state: FSMContext) -> None:
+        await handle_start(message, state, bot, config)
+
+    router.message.register(launch_valera_text, F.text.lower() == "запустить валеру")
     router.message.register(free_chat_wrapper)
 
     # Register command handlers for side menu commands
@@ -1000,87 +860,13 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 def build_main_menu() -> ReplyKeyboardMarkup:
     kb = [
+        [KeyboardButton(text="Запустить Валеру")],
         [KeyboardButton(text="Разбор переписки"), KeyboardButton(text="Анкета девушки")],
         [KeyboardButton(text="Моя анкета"), KeyboardButton(text="Темы для разговора")],
         [KeyboardButton(text="Баланс"), KeyboardButton(text="Реферальная программа")],
         [KeyboardButton(text="Помощь")],
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Пришли текст или фото переписки…")
-
-
-@router.message(F.photo)
-async def handle_photo(message: Message, bot: Bot, state: FSMContext):
-    from .openai_client import OpenAIClient
-    from .prompts import SYSTEM_PROMPT
-
-    # download best-quality photo
-    photo = message.photo[-1]
-    file = await bot.get_file(photo.file_id)
-    file_path = file.file_path
-    b = await bot.download_file(file_path)
-    img_bytes = b.read()
-    import base64
-    img_b64 = base64.b64encode(img_bytes).decode()
-
-    # build messages for vision
-    system = {"role": "system", "content": SYSTEM_PROMPT}
-    client = OpenAIClient(api_key=os.environ.get("OPENAI_API_KEY", ""))
-    user_msg = client.build_user_content(text="Это скрин/фото из переписки. Проанализируй и скажи, что ответить.", image_b64=img_b64)
-    reply = await client.acomplete([system, user_msg])
-    await message.answer(reply, reply_markup=build_main_menu())
-
-
-async def on_startup(bot: Bot):
-    try:
-        await bot.set_my_commands([
-            BotCommand(command="start", description="Запустить Валеру"),
-            BotCommand(command="start_chat", description="Разбор переписки"),
-            BotCommand(command="girl_profile", description="Анализ профиля девушки"),
-            BotCommand(command="my_profile", description="Анализ моего профиля"),
-            BotCommand(command="awkward_pauses", description="Неловкие паузы"),
-            BotCommand(command="show_balance", description="Мой баланс"),
-            BotCommand(command="buy_credits", description="Пополнить баланс"),
-            BotCommand(command="show_referral", description="Реферальная программа"),
-            BotCommand(command="launch_valera", description="Запустить Валеру"),
-        ])
-    except Exception:
-        pass
-
-
-@router.message(F.text.lower().in_({"запустить валеру"}))
-async def handle_launch_valera(message: Message):
-    # Reuse /start flow
-    await message.answer("Валера запущен.\n\nПришли текст или скрин переписки, анкету или задай вопрос.", reply_markup=build_main_menu())
-
-
-@router.message(F.text.lower().in_({"разбор переписки","анкета девушки","моя анкета","темы для разговора","баланс","реферальная программа","помощь"}))
-async def handle_menu_text_routes(message: Message, state: FSMContext):
-    t = message.text.lower()
-    if t == "разбор переписки":
-        await message.answer("Пришли переписку текстом или скрином.\n\nЯ дам краткий анализ и предложу 2–3 ответа.", reply_markup=build_main_menu())
-    elif t == "анкета девушки":
-        await message.answer("Пришли анкету девушки (текст/скрин).\n\nЯ разберу и подскажу, как лучше отвечать и заинтересовать.", reply_markup=build_main_menu())
-    elif t == "моя анкета":
-        await message.answer("Пришли свою анкету.\n\nДам оценку по 10-балльной шкале и checklist улучшений.", reply_markup=build_main_menu())
-    elif t == "темы для разговора":
-        await message.answer("Опиши контекст общения.\n\nЯ подкину лёгкие темы и ходы, чтобы держать вайб.", reply_markup=build_main_menu())
-    elif t == "баланс":
-        await message.answer("Текущий баланс будет показан здесь.\n\nРеферальная ссылка — в разделе «Реферальная программа».", reply_markup=build_main_menu())
-    elif t == "реферальная программа":
-        await message.answer("Приглашай друга — вы оба получите +10 токенов после запуска бота другом.\n\nЗдесь будет твоя реф-ссылка.", reply_markup=build_main_menu())
-    else:
-        await message.answer("Если нужна помощь — задай вопрос в свободной форме.\n\nМожешь сразу прислать скрин переписки.", reply_markup=build_main_menu())
-
-
-async def mark_user_launched(session, user):
-    # Помечаем пользователя как запустившего бота впервые
-    if not getattr(user, "launched", False):
-        user.launched = True
-        await session.commit()
-        # Если есть реферер — начисляем обоим +10
-        try:
-            await grant_referral_bonus(session, user, 10, 10)
-        except Exception:
-            pass

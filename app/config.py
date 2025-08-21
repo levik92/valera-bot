@@ -41,8 +41,8 @@ class Config:
 
     # Количество токенов, которое получает новый пользователь при первом запуске бота.
     # Эти токены не восполняются автоматически, их можно получить через рефералов или покупку.
-    initial_credits: int = field(default_factory=lambda: 10
+    initial_credits: int = field(default_factory=lambda: 10)
 
     # Бонусные токены, которые выдаются обоим при реферальном приглашении.
-    referral_bonus: int = field(default_factory=lambda: 10
+    referral_bonus: int = field(default_factory=lambda: 10)
     currency: str = field(default_factory=lambda: "XTR")
