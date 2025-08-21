@@ -13,6 +13,7 @@ import logging
 import os
 import base64
 from typing import List, Optional
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatType, ChatAction
@@ -127,7 +128,11 @@ async def handle_start(
                         [
                             InlineKeyboardButton(
                                 text="Подписаться",
-                                url=f"https://t.me/{config.telegram_channel_id.lstrip('@')}"
+                                url=f"https://t.me/{config.telegram_channel_id.lstrip('@')
+    try:
+        await message.answer('Выбери действие или пришли переписку/скрин:\n\nЯ умею анализировать переписки, анкеты и помогать с темами для разговора.', reply_markup=build_main_menu())
+    except Exception:
+        pass}"
                             )
                         ],
                         [
@@ -886,7 +891,7 @@ async def setup_bot() -> None:
         # Replicate balance display without referral link
         user_id = message.from_user.id
         if not await ensure_membership(bot, config, user_id):
-            await message.answer("Нужно подписаться на канал, чтобы использовать бота.")
+            await message.answer('Текущий баланс: ...\n(Реферальная ссылка — в разделе «Реферальная программа»)', reply_markup=build_main_menu())
             return
         async with async_session_factory() as session:
             user = await get_user(session, user_id)
@@ -995,3 +1000,87 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+def build_main_menu() -> ReplyKeyboardMarkup:
+    kb = [
+        [KeyboardButton(text="Разбор переписки"), KeyboardButton(text="Анкета девушки")],
+        [KeyboardButton(text="Моя анкета"), KeyboardButton(text="Темы для разговора")],
+        [KeyboardButton(text="Баланс"), KeyboardButton(text="Реферальная программа")],
+        [KeyboardButton(text="Помощь")],
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Пришли текст или фото переписки…")
+
+
+@router.message(F.photo)
+async def handle_photo(message: Message, bot: Bot, state: FSMContext):
+    from .openai_client import OpenAIClient
+    from .prompts import SYSTEM_PROMPT
+
+    # download best-quality photo
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
+    file_path = file.file_path
+    b = await bot.download_file(file_path)
+    img_bytes = b.read()
+    import base64
+    img_b64 = base64.b64encode(img_bytes).decode()
+
+    # build messages for vision
+    system = {"role": "system", "content": SYSTEM_PROMPT}
+    client = OpenAIClient(api_key=os.environ.get("OPENAI_API_KEY", ""))
+    user_msg = client.build_user_content(text="Это скрин/фото из переписки. Проанализируй и скажи, что ответить.", image_b64=img_b64)
+    reply = await client.acomplete([system, user_msg])
+    await message.answer(reply, reply_markup=build_main_menu())
+
+
+async def on_startup(bot: Bot):
+    try:
+        await bot.set_my_commands([
+            BotCommand(command="start", description="Запустить Валеру"),
+            BotCommand(command="start_chat", description="Разбор переписки"),
+            BotCommand(command="girl_profile", description="Анализ профиля девушки"),
+            BotCommand(command="my_profile", description="Анализ моего профиля"),
+            BotCommand(command="awkward_pauses", description="Неловкие паузы"),
+            BotCommand(command="show_balance", description="Мой баланс"),
+            BotCommand(command="buy_credits", description="Пополнить баланс"),
+            BotCommand(command="show_referral", description="Реферальная программа"),
+            BotCommand(command="launch_valera", description="Запустить Валеру"),
+        ])
+    except Exception:
+        pass
+
+
+@router.message(F.text.lower().in_({"запустить валеру"}))
+async def handle_launch_valera(message: Message):
+    # Reuse /start flow
+    await message.answer("Валера запущен.\n\nПришли текст или скрин переписки, анкету или задай вопрос.", reply_markup=build_main_menu())
+
+
+@router.message(F.text.lower().in_({"разбор переписки","анкета девушки","моя анкета","темы для разговора","баланс","реферальная программа","помощь"}))
+async def handle_menu_text_routes(message: Message, state: FSMContext):
+    t = message.text.lower()
+    if t == "разбор переписки":
+        await message.answer("Пришли переписку текстом или скрином.\n\nЯ дам краткий анализ и предложу 2–3 ответа.", reply_markup=build_main_menu())
+    elif t == "анкета девушки":
+        await message.answer("Пришли анкету девушки (текст/скрин).\n\nЯ разберу и подскажу, как лучше отвечать и заинтересовать.", reply_markup=build_main_menu())
+    elif t == "моя анкета":
+        await message.answer("Пришли свою анкету.\n\nДам оценку по 10-балльной шкале и checklist улучшений.", reply_markup=build_main_menu())
+    elif t == "темы для разговора":
+        await message.answer("Опиши контекст общения.\n\nЯ подкину лёгкие темы и ходы, чтобы держать вайб.", reply_markup=build_main_menu())
+    elif t == "баланс":
+        await message.answer("Текущий баланс будет показан здесь.\n\nРеферальная ссылка — в разделе «Реферальная программа».", reply_markup=build_main_menu())
+    elif t == "реферальная программа":
+        await message.answer("Приглашай друга — вы оба получите +10 токенов после запуска бота другом.\n\nЗдесь будет твоя реф-ссылка.", reply_markup=build_main_menu())
+    else:
+        await message.answer("Если нужна помощь — задай вопрос в свободной форме.\n\nМожешь сразу прислать скрин переписки.", reply_markup=build_main_menu())
+
+
+async def mark_user_launched(session, user):
+    # Помечаем пользователя как запустившего бота впервые
+    if not getattr(user, "launched", False):
+        user.launched = True
+        await session.commit()
+        # Если есть реферер — начисляем обоим +10
+        try:
+            await grant_referral_bonus(session, user, 10, 10)
+        except Exception:
+            pass

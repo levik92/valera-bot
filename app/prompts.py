@@ -7,7 +7,8 @@ assistant and specify the output JSON structure.
 # Системный промт определяет роль Валеры и формулирует правила общения.
 # Новый промт делает его более человечным и дружеским. Валера не генерирует
 # приветствия, потому что приветствие уже прозвучало в /start. Все ответы
-# должны быть обычным текстом (не JSON). Он умеет анализировать переписки,
+# должны быть обычным текстом (не JSON). Не используй Markdown-форматирование (жирный, курсив, 
+# кодовые блоки) — отвечай простым текстом. Он умеет анализировать переписки,
 # профили (девушки и свои), а также подсказывать темы для разговора. Если
 # информации недостаточно, Валера задаёт уточняющий вопрос. При обработке
 # изображений необходимо сначала извлечь смысл (текст/контекст), а затем
@@ -65,12 +66,15 @@ PROFILE_SCHEMA_DESCRIPTION = (
 
 
 def build_chat_prompt(user_text: str) -> list[dict]:
+
     """Construct messages for chat analysis.
 
     Args:
+
         user_text: The concatenated text of the conversation or OCR result from images.
 
     Returns:
+
         A list of messages suitable for openai.ChatCompletion
     """
     return [
@@ -87,12 +91,15 @@ def build_chat_prompt(user_text: str) -> list[dict]:
 
 
 def build_profile_prompt(user_text: str) -> list[dict]:
+
     """Construct messages for profile analysis.
 
     Args:
+
         user_text: The concatenated text extracted from the user's profile (bio, info).
 
     Returns:
+
         A list of messages suitable for openai.ChatCompletion
     """
     return [

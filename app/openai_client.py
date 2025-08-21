@@ -1,45 +1,43 @@
 """
-Wrapper around the OpenAI API to perform chat completions with retries.
-
-This module abstracts the details of calling the OpenAI API and parsing the
-response.  It performs a basic retry strategy and attempts to repair
-unparseable JSON by asking the model to fix its output.
+Wrapper around the OpenAI API (>=1.40) to perform chat completions, including vision.
 """
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Any, List
+from typing import Any, List, Dict, Union
 
-import openai
-
+from openai import OpenAI
 
 class OpenAIClient:
     def __init__(self, api_key: str, model: str = "gpt-4o") -> None:
-        openai.api_key = api_key
+        self.client = OpenAI(api_key=api_key)
         self.model = model
 
-    async def chat(
-        self, messages: List[dict], max_retries: int = 0, timeout: int = 60
-    ) -> str:
-        """Send a chat completion request and return the assistant's reply as plain text.
-
-        Args:
-            messages: List of chat messages (dicts with roles 'system', 'user', 'assistant').
-            max_retries: Unused; kept for backward compatibility.
-            timeout: Timeout for the network request in seconds.
-
-        Returns:
-            The text content of the assistant's reply.
+    async def acomplete(self, messages: List[Dict[str, Any]], temperature: float = 0.5, timeout: float = 60.0) -> str:
         """
-        try:
-            resp = await openai.ChatCompletion.acreate(
+        Call the chat.completions API (supports text+image messages on vision models).
+        """
+        loop = asyncio.get_event_loop()
+        def _call():
+            resp = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.5,
-                timeout=timeout,
+                temperature=temperature,
             )
-            return resp.choices[0].message.content
-        except Exception as exc:
-            # Reraise the error so caller can handle it
-            raise
+            return resp.choices[0].message.content or ""
+        return await loop.run_in_executor(None, _call)
+
+    def build_user_content(self, text: str | None = None, image_b64: str | None = None) -> Dict[str, Any]:
+        """
+        Helper to build a user message content array with optional base64 image.
+        """
+        if image_b64:
+            return {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": text or "Проанализируй это изображение и помоги с перепиской."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                ],
+            }
+        else:
+            return {"role": "user", "content": text or ""}
