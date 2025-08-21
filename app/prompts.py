@@ -66,13 +66,16 @@ PROFILE_SCHEMA_DESCRIPTION = (
 
 def build_chat_prompt(user_text: str) -> list[dict]:
 
+
     """Construct messages for chat analysis.
 
     Args:
 
+
         user_text: The concatenated text of the conversation or OCR result from images.
 
     Returns:
+
 
         A list of messages suitable for openai.ChatCompletion
     """
@@ -91,13 +94,16 @@ def build_chat_prompt(user_text: str) -> list[dict]:
 
 def build_profile_prompt(user_text: str) -> list[dict]:
 
+
     """Construct messages for profile analysis.
 
     Args:
 
+
         user_text: The concatenated text extracted from the user's profile (bio, info).
 
     Returns:
+
 
         A list of messages suitable for openai.ChatCompletion
     """

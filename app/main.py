@@ -661,6 +661,7 @@ async def setup_bot() -> None:
     await init_db()
     bot = Bot(token=config.bot_token)
     dp = Dispatcher()
+    dp.startup.register(on_startup)
     router = Router()
 
     # Build OpenAI client
@@ -824,6 +825,8 @@ async def setup_bot() -> None:
         await handle_start(message, state, bot, config)
 
     router.message.register(launch_valera_text, F.text.lower() == "запустить валеру")
+    router.message.register(launch_valera_text, F.text.lower().startswith('🚀 запустить валеру') | (F.text.lower() == 'запустить валеру'))
+    router.message.register(menu_text_router, F.text)
     router.message.register(free_chat_wrapper)
 
     # Register command handlers for side menu commands
@@ -870,3 +873,47 @@ def build_main_menu() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="Помощь")],
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Пришли текст или фото переписки…")
+
+async def launch_valera_text(message: Message, state: FSMContext) -> None:
+    await handle_start(message, state, bot, config)
+
+async def menu_text_router(message: Message, state: FSMContext) -> None:
+    t = (message.text or "").lower().strip()
+    # remove leading emojis if present
+    for pref in ["🚀 ", "💬 ", "👩", "🧑", "🧠 ", "💎 ", "🤝 ", "🆘 "]:
+        if t.startswith(pref.lower()):
+            t = t[len(pref):]
+    if t.endswith(" "):
+        t = t.strip()
+    if t == "запустить валеру":
+        await handle_start(message, state, bot, config); return
+    if t == "разбор переписки":
+        await start_chat_cmd(message, state); return
+    if t == "анкета девушки":
+        await girl_profile_cmd(message, state); return
+    if t == "моя анкета":
+        await my_profile_cmd(message, state); return
+    if t == "темы для разговора":
+        await awkward_pauses_cmd(message, state); return
+    if t == "баланс":
+        await show_balance_cmd(message); return
+    if t == "реферальная программа":
+        await show_referral_cmd(message); return
+    if t == "помощь":
+        await message.answer("Опиши, что именно не получается — помогу 🙌", reply_markup=build_main_menu()); return
+
+
+async def on_startup(bot: Bot):
+    try:
+        await bot.set_my_commands([
+            BotCommand(command="start", description="Запустить Валеру"),
+            BotCommand(command="start_chat", description="Разбор переписки"),
+            BotCommand(command="girl_profile", description="Анализ профиля девушки"),
+            BotCommand(command="my_profile", description="Анализ моего профиля"),
+            BotCommand(command="awkward_pauses", description="Неловкие паузы"),
+            BotCommand(command="show_balance", description="Мой баланс"),
+            BotCommand(command="buy_credits", description="Пополнить баланс"),
+            BotCommand(command="show_referral", description="Реферальная программа"),
+        ])
+    except Exception:
+        pass
