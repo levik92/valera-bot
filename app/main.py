@@ -668,7 +668,22 @@ async def setup_bot() -> None:
     await init_db()
     bot = Bot(token=config.bot_token)
     dp = Dispatcher()
-    dp.startup.register(on_startup)
+    
+          async def on_startup(bot: Bot):
+            try:
+                await bot.set_my_commands([
+                    BotCommand(command="start", description="Запустить Валеру"),
+                    BotCommand(command="start_chat", description="Разбор переписки"),
+                    BotCommand(command="girl_profile", description="Анализ профиля девушки"),
+                    BotCommand(command="my_profile", description="Анализ моего профиля"),
+                    BotCommand(command="awkward_pauses", description="Неловкие паузы"),
+                    BotCommand(command="show_balance", description="Мой баланс"),
+                    BotCommand(command="buy_credits", description="Пополнить баланс"),
+                    BotCommand(command="show_referral", description="Реферальная программа"),
+                ])
+            except Exception:
+                pass
+dp.startup.register(on_startup)
     router = Router()
 
     # Build OpenAI client
@@ -864,8 +879,10 @@ async def setup_bot() -> None:
     await dp.start_polling(bot)
 
 
+
+
 def main() -> None:
-    asyncio.run(setup_bot())
+ #    asyncio.run(setup_bot())
 
 
 if __name__ == "__main__":
