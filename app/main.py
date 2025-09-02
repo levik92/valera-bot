@@ -340,7 +340,7 @@ async def handle_profile_input(
             content = []
             content.append({"type": "text", "text": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nДанные:\n" + combined})
             for img in encoded_images:
-                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
+                                                content.append({'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + img, 'detail': 'auto'}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -413,7 +413,7 @@ async def handle_girl_profile_input(
             content = []
             content.append({"type": "text", "text": "Я отправлю тебе профиль девушки, подскажи что к чему там.\n\nПрофиль:\n" + combined})
             for img in encoded_images:
-                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
+                        content.append({'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + img, 'detail': 'auto'}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -487,7 +487,7 @@ async def handle_my_profile_input(
             content = []
             content.append({"type": "text", "text": "Я отправлю тебе свой профиль, подскажи что можно улучшить.\n\nПрофиль:\n" + combined})
             for img in encoded_images:
-                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
+                        content.append({'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + img, 'detail': 'auto'}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -561,7 +561,7 @@ async def handle_pause_input(
             content = []
             content.append({"type": "text", "text": "Я общаюсь с девушкой и возникла неловкая пауза, подкинь какие-нибудь темы для беседы, чтобы её заполнить.\n\nКонтекст:\n" + combined})
             for img in encoded_images:
-                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
+                        content.append({'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + img, 'detail': 'auto'}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -636,7 +636,7 @@ async def handle_free_chat(
             content = []
             content.append({"type": "text", "text": combined})
             for img in encoded_images:
-                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
+                        content.append({'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + img, 'detail': 'auto'}})
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
