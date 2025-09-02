@@ -926,7 +926,6 @@ async def menu_text_router(message: Message, state: FSMContext) -> None:
     if t == "помощь":
         await message.answer("Опиши, что именно не получается — помогу 🙌", reply_markup=build_main_menu()); return
 
-
 async def on_startup(bot: Bot):
     try:
         await bot.set_my_commands([
