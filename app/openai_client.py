@@ -14,9 +14,23 @@ class OpenAIClient:
         self.client = OpenAI(api_key=api_key)
         self.model = model
 
+
+    
     async def chat(self, messages: List[Dict[str, Any]], temperature: float = 0.5, timeout: float = 60.0) -> str:
         loop = asyncio.get_event_loop()
         def _call():
+                    # Ensure all image_url entries include 'detail': 'auto'
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    if item.get("type") == "image_url":
+                        image_data = item.get("image_url")
+                        if isinstance(image_data, str):
+                            item["image_url"] = {"url": image_data, "detail": "auto"}
+                        elif isinstance(image_data, dict) and "detail" not in image_data:
+                            image_data["detail"] = "auto"
+
             resp = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
