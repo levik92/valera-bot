@@ -254,7 +254,14 @@ async def handle_chat_input(
             content.append({"type": "text", "text": "Я отправлю тебе переписку с девушкой, помоги мне её проанализировать.\n\nПереписка:\n" + combined})
             # Add each image
             for img in encoded_images:
-                content.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64," + img}})
+                content.append({
+    "type": "image_url",
+    "image_url": {
+        "url": "data:image/jpeg;base64," + img,
+        "detail": "auto"
+    }
+})
+
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
